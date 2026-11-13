@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>פלאפי בירד</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #4ec0ca;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: rgba(0, 0, 0, 0.35);
+    color: #fff;
+    text-align: center;
+    padding: 20px;
+    transition: opacity 0.25s;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay h1 {
+    font-size: clamp(32px, 8vw, 56px);
+    text-shadow: 0 3px 0 rgba(0,0,0,0.4);
+  }
+  #overlay p {
+    font-size: clamp(16px, 4.5vw, 22px);
+    line-height: 1.6;
+    text-shadow: 0 2px 0 rgba(0,0,0,0.4);
+  }
+  #score-display {
+    position: fixed;
+    top: 4vh;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: clamp(40px, 12vw, 72px);
+    font-weight: bold;
+    color: #fff;
+    text-shadow: 0 4px 0 rgba(0,0,0,0.35);
+    pointer-events: none;
+    z-index: 5;
+  }
+  #best {
+    font-size: clamp(14px, 4vw, 18px);
+    opacity: 0.9;
+  }
+  .btn {
+    background: #f5a623;
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 14px 40px;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #c77f10;
+    touch-action: manipulation;
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #c77f10; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="score-display" style="display:none">0</div>
+<div id="overlay">
+  <h1 id="title">פלאפי בירד</h1>
+  <p id="subtitle">הקש בכל מקום כדי לעוף<br>היזהר מהצינורות!</p>
+  <p id="best"></p>
+  <button class="btn" id="start-btn">התחל משחק</button>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const title = document.getElementById('title');
+  const subtitle = document.getElementById('subtitle');
+  const bestEl = document.getElementById('best');
+  const startBtn = document.getElementById('start-btn');
+  const scoreDisplay = document.getElementById('score-display');
+
+  let W, H, groundH;
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    groundH = Math.max(60, H * 0.1);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const GRAVITY = 1800;
+  const FLAP = -520;
+  const PIPE_SPEED = 220;
+  const PIPE_GAP = () => Math.max(140, H * 0.28);
+  const PIPE_WIDTH = 70;
+  const PIPE_INTERVAL = 1.6;
+
+  const state = {
+    mode: 'menu',
+    bird: { x: 0, y: 0, vy: 0, r: 18, rot: 0 },
+    pipes: [],
+    score: 0,
+    best: Number(localStorage.getItem('flappy_best') || 0),
+    time: 0,
+    spawnTimer: 0,
+    groundX: 0,
+    wings: 0
+  };
+
+  function resetGame() {
+    state.bird.x = W * 0.3;
+    state.bird.y = H * 0.4;
+    state.bird.vy = 0;
+    state.bird.rot = 0;
+    state.pipes = [];
+    state.score = 0;
+    state.spawnTimer = 0.6;
+    scoreDisplay.textContent = '0';
+  }
+
+  function spawnPipe() {
+    const gap = PIPE_GAP();
+    const margin = 60;
+    const top = margin + Math.random() * (H - groundH - gap - margin * 2);
+    state.pipes.push({ x: W + PIPE_WIDTH, top: top, gap: gap, passed: false });
+  }
+
+  function flap() {
+    if (state.mode !== 'play') return;
+    state.bird.vy = FLAP;
+    state.wings = 0.25;
+  }
+
+  function startGame() {
+    resetGame();
+    state.mode = 'play';
+    overlay.classList.add('hidden');
+    scoreDisplay.style.display = 'block';
+  }
+
+  function gameOver() {
+    state.mode = 'dead';
+    if (state.score > state.best) {
+      state.best = state.score;
+      localStorage.setItem('flappy_best', state.best);
+    }
+    title.textContent = 'נגמר המשחק!';
+    subtitle.innerHTML = 'הניקוד שלך: <b>' + state.score + '</b>';
+    bestEl.textContent = 'שיא אישי: ' + state.best;
+    startBtn.textContent = 'שחק שוב';
+    scoreDisplay.style.display = 'none';
+    overlay.classList.remove('hidden');
+  }
+
+  function update(dt) {
+    state.time += dt;
+    state.groundX = (state.groundX - PIPE_SPEED * dt) % 24;
+    if (state.wings > 0) state.wings -= dt;
+
+    if (state.mode === 'menu') {
+      state.bird.x = W * 0.3;
+      state.bird.y = H * 0.4 + Math.sin(state.time * 3) * 14;
+      return;
+    }
+    if (state.mode !== 'play') return;
+
+    const b = state.bird;
+    b.vy += GRAVITY * dt;
+    b.y += b.vy * dt;
+    b.rot = Math.max(-0.5, Math.min(1.4, b.vy / 600));
+
+    state.spawnTimer -= dt;
+    if (state.spawnTimer <= 0) {
+      spawnPipe();
+      state.spawnTimer = PIPE_INTERVAL;
+    }
+
+    for (const p of state.pipes) p.x -= PIPE_SPEED * dt;
+    state.pipes = state.pipes.filter(p => p.x + PIPE_WIDTH > -10);
+
+    for (const p of state.pipes) {
+      if (!p.passed && p.x + PIPE_WIDTH < b.x - b.r) {
+        p.passed = true;
+        state.score++;
+        scoreDisplay.textContent = state.score;
+      }
+      const withinX = b.x + b.r > p.x && b.x - b.r < p.x + PIPE_WIDTH;
+      const hitVertical = b.y - b.r < p.top || b.y + b.r > p.top + p.gap;
+      if (withinX && hitVertical) { gameOver(); return; }
+    }
+
+    if (b.y + b.r > H - groundH || b.y - b.r < 0) { gameOver(); }
+  }
+
+  function draw() {
+    ctx.fillStyle = '#4ec0ca';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    const cloudY = H * 0.15;
+    for (let i = 0; i < 3; i++) {
+      const cx = ((W * 0.25 * i) + (state.time * 12) % (W + 200)) % (W + 200) - 100;
+      ctx.beginPath();
+      ctx.arc(cx, cloudY + i * 30, 30, 0, Math.PI * 2);
+      ctx.arc(cx + 35, cloudY + i * 30 - 10, 24, 0, Math.PI * 2);
+      ctx.arc(cx - 30, cloudY + i * 30 + 5, 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const p of state.pipes) {
+      drawPipe(p.x, 0, PIPE_WIDTH, p.top, true);
+      drawPipe(p.x, p.top + p.gap, PIPE_WIDTH, H - groundH - p.top - p.gap, false);
+    }
+
+    const gy = H - groundH;
+    ctx.fillStyle = '#ded895';
+    ctx.fillRect(0, gy, W, groundH);
+    ctx.fillStyle = '#5ee270';
+    ctx.fillRect(0, gy, W, 14);
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    for (let x = state.groundX; x < W; x += 24) {
+      ctx.fillRect(x, gy + 14, 12, groundH - 14);
+    }
+
+    drawBird();
+
+    if (state.mode === 'play') {
+      scoreDisplay.textContent = state.score;
+    }
+  }
+
+  function drawPipe(x, y, w, h, isTop) {
+    ctx.fillStyle = '#73bf2e';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = '#94e051';
+    ctx.fillRect(x + 6, y, 12, h);
+    const capH = 26;
+    const capY = isTop ? h - capH : 0;
+    ctx.fillStyle = '#5aa022';
+    ctx.fillRect(x - 5, y + capY, w + 10, capH);
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.strokeRect(x - 5, y + capY, w + 10, capH);
+  }
+
+  function drawBird() {
+    const b = state.bird;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.rot);
+
+    ctx.fillStyle = '#f7d51d';
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.stroke();
+
+    const wingUp = state.wings > 0;
+    ctx.fillStyle = '#f5a623';
+    ctx.beginPath();
+    ctx.ellipse(-4, wingUp ? -6 : 5, 9, 6, wingUp ? -0.6 : 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(7, -6, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(9, -6, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#e8642c';
+    ctx.beginPath();
+    ctx.moveTo(14, 0);
+    ctx.lineTo(24, 2);
+    ctx.lineTo(14, 6);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  document.addEventListener('pointerdown', (e) => {
+    if (e.target === startBtn) return;
+    flap();
+  });
+  startBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  startBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startGame();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      e.preventDefault();
+      if (state.mode === 'menu') startGame();
+      else flap();
+    }
+  });
+
+  bestEl.textContent = state.best > 0 ? 'שיא אישי: ' + state.best : '';
+})();
+</script>
+</body>
+</html>
